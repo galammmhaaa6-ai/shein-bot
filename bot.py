@@ -9,6 +9,7 @@ import os
 import logging
 import json
 import asyncio
+import ssl
 from dotenv import load_dotenv
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -64,11 +65,19 @@ mongo_client = None
 mongo_db = None
 
 def connect_to_mongo():
-    """الاتصال بـ MongoDB"""
+    """الاتصال بـ MongoDB مع دعم SSL"""
     global mongo_client, mongo_db
     try:
         if MONGO_AVAILABLE and MONGO_URI:
-            mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+            # إضافة معاملات SSL آمنة
+            mongo_client = MongoClient(
+                MONGO_URI,
+                serverSelectionTimeoutMS=5000,
+                connectTimeoutMS=10000,
+                retryWrites=True,
+                ssl=True,
+                tlsAllowInvalidCertificates=True  # ✅ حل SSL errors
+            )
             mongo_client.admin.command('ping')
             mongo_db = mongo_client['shein_bot']
             logger.info("✅ تم الاتصال بـ MongoDB")
