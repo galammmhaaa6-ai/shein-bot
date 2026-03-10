@@ -17,6 +17,13 @@ from telegram.ext import (
 )
 from telegram.constants import ParseMode
 
+# حاول استيراد pymongo، إن لم تكن مثبتة استخدم JSON
+try:
+    from pymongo import MongoClient
+    MONGO_AVAILABLE = True
+except ImportError:
+    MONGO_AVAILABLE = False
+
 # تحميل المتغيرات
 load_dotenv()
 
@@ -37,8 +44,9 @@ try:
 except (ValueError, TypeError):
     ADMIN_ID = None
 
-# ملفات التخزين
+# ملفات التخزين والقاعدة البيانات
 CONFIG_FILE = 'config.json'
+MONGO_URI = os.getenv('MONGO_URI', None)
 
 # حالات المحادثة
 CATEGORY_SELECTION, PRICE_INPUT, ADMIN_MENU, SET_RATE, SET_CATEGORY_FEE, SET_OTHER_FEE, SET_WHATSAPP = range(7)
@@ -51,26 +59,79 @@ DEFAULT_CONFIG = {
     'whatsapp': '+963123456789'
 }
 
+# قاعدة البيانات
+mongo_client = None
+mongo_db = None
+
+def connect_to_mongo():
+    """الاتصال بـ MongoDB"""
+    global mongo_client, mongo_db
+    try:
+        if MONGO_AVAILABLE and MONGO_URI:
+            mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+            mongo_client.admin.command('ping')
+            mongo_db = mongo_client['shein_bot']
+            logger.info("✅ تم الاتصال بـ MongoDB")
+            return True
+    except Exception as e:
+        logger.warning(f"⚠️ خطأ MongoDB: {e}. سيتم استخدام JSON بديل")
+    return False
+
 
 def load_config():
-    """تحميل الإعدادات"""
+    """تحميل الإعدادات من MongoDB أو JSON"""
+    
+    # المحاولة الأولى: MongoDB
+    if mongo_db:
+        try:
+            config_doc = mongo_db['config'].find_one({'_id': 'settings'})
+            if config_doc:
+                # إزالة _id من المستند
+                config_doc.pop('_id', None)
+                config = DEFAULT_CONFIG.copy()
+                config.update(config_doc)
+                return config
+        except Exception as e:
+            logger.warning(f"خطأ في قراءة MongoDB: {e}")
+    
+    # المحاولة الثانية: JSON local
     if os.path.exists(CONFIG_FILE):
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 loaded = json.load(f)
-                # تأكد أن جميع المفاتيح موجودة
                 config = DEFAULT_CONFIG.copy()
                 config.update(loaded)
                 return config
         except Exception as e:
-            logger.warning(f"خطأ في تحميل config.json: {e}")
+            logger.warning(f"خطأ في قراءة JSON: {e}")
+    
     return DEFAULT_CONFIG.copy()
 
 
 def save_config(config):
-    """حفظ الإعدادات"""
-    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
+    """حفظ الإعدادات في MongoDB و JSON معاً"""
+    
+    # حفظ في MongoDB
+    if mongo_db:
+        try:
+            config_to_save = config.copy()
+            config_to_save['_id'] = 'settings'
+            mongo_db['config'].update_one(
+                {'_id': 'settings'},
+                {'$set': config_to_save},
+                upsert=True
+            )
+            logger.info("✅ تم حفظ البيانات في MongoDB")
+        except Exception as e:
+            logger.warning(f"خطأ في حفظ MongoDB: {e}")
+    
+    # حفظ في JSON أيضاً (احتياطي)
+    try:
+        with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+            json.dump(config, f, ensure_ascii=False, indent=2)
+        logger.info("✅ تم حفظ البيانات في JSON")
+    except Exception as e:
+        logger.error(f"خطأ في حفظ JSON: {e}")
 
 
 def format_currency(amount: float) -> str:
@@ -507,6 +568,9 @@ def main() -> None:
     if not TELEGRAM_TOKEN:
         logger.error("❌ لم يتم تعيين TELEGRAM_BOT_TOKEN")
         return
+    
+    # الاتصال بـ MongoDB
+    connect_to_mongo()
     
     logger.info("✅ بدء البوت...")
     
