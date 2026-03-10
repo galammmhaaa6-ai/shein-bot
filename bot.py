@@ -600,7 +600,12 @@ def main() -> None:
             SET_OTHER_FEE: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_other_fee_input)],
             SET_WHATSAPP: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_whatsapp_input)],
         },
-        fallbacks=[CallbackQueryHandler(callback_handler, pattern='^(start_again|exit)$')]
+        # السماح بمقاطعة المحادثة من أي حالة باستخدام أوامر
+        fallbacks=[
+            CommandHandler("start", start),
+            CommandHandler("admin", admin_menu),
+            CallbackQueryHandler(callback_handler, pattern='^(start_again|exit)$')
+        ]
     )
     
     app.add_handler(conv_handler)
